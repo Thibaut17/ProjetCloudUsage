@@ -1,0 +1,11 @@
+services:
+
+  phpmyadmin:
+    image: phpmyadmin
+    container_name: phpmyadmin
+    environment:
+      PMA_HOST: 192.168.44.122
+      PMA_PORT: 3306
+      UPLOAD_LIMIT: 1024M
+    ports:
+      - "80:80"
