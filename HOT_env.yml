@@ -1,0 +1,7 @@
+parameters:
+
+  key_name: INFO3_tjolive_keypair
+  user: INFO3_tjolive
+  flavor: m1.mini
+  image: c19f8c61-20da-4c08-b249-2005ba0efd10
+#  routerid: 6a62d7e5-a1e6-4fe3-9e08-7497065caf6f 

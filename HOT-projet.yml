@@ -1,0 +1,188 @@
+heat_template_version: "2021-04-16"
+
+description: "Infra Projet cloud usage"
+
+parameters:
+  image:
+    type: string
+    description: ID of image
+  flavor:
+    type: string
+    description: Flavor used
+    default: m1.mini
+  key_name:
+    type: string
+    description: Keypair name
+  user:
+    type: string
+    description: ID of user associated with a Key Pair
+#  routerid:
+#    type: string
+#    description: ID of project router
+
+resources:
+
+  Network1:
+    type: OS::Neutron::Net
+    properties:
+      admin_state_up: true
+      name: network_projet_cloud_usage
+
+  Subnet1:
+    depends_on: Network1
+    type: OS::Neutron::Subnet
+    properties:
+      cidr: 192.168.44.0/24
+      name: subnet-projet-cloud-usage
+      network_id: {get_resource: Network1}
+      #gateway_ip: 192.168.111.254
+      ip_version: 4
+
+  RouterInterface1:
+    type: OS::Neutron::RouterInterface
+    properties:
+      router_id: { get_resource: ROUTER }
+      subnet: { get_resource: Subnet1 }
+
+  ROUTER:
+    type: OS::Neutron::Router
+    properties:
+      external_gateway_info: { network: External-ENSSAT }
+      name: router_projet_cloud_usage
+
+
+  VM_port_webserver:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: Network1 }
+      fixed_ips: 
+        - subnet_id: { get_resource: Subnet1}
+      security_groups:
+        - { get_resource: SecGroupProjetWeb }
+        - { get_resource: SecGroupProjetSsh }
+  VM_port_database:
+    type: OS::Neutron::Port
+    properties:
+      network: { get_resource: Network1 }
+      fixed_ips:
+        - subnet_id: { get_resource: Subnet1}
+      security_groups:
+        - { get_resource: SecGroupProjetDb }
+        - { get_resource: SecGroupProjetSsh }
+
+  VM_FLOAT_IP_WEBSERVER:
+    depends_on: VM_WEBSERVER
+    type: OS::Neutron::FloatingIP
+    properties:
+      floating_network: "External-ENSSAT"
+
+  VM_Float_Assoc_WEBSERVER:
+    type: OS::Neutron::FloatingIPAssociation
+    properties:
+      floatingip_id: { get_resource: VM_FLOAT_IP_WEBSERVER }
+      port_id: { get_resource: VM_port_webserver }
+
+
+  SecGroupProjetWeb:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: SecGroup for WEB-hosting VM
+      name: sg-projet-cloud-usage-web
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 80
+          port_range_max: 80
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 443
+          port_range_max: 443
+        - remote_ip_prefix: 0.0.0.0/0
+
+  SecGroupProjetDb:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: SecGroup for WEB-hosting VM
+      name: sg-projet-cloud-usage-db
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 3306
+          port_range_max: 3306
+
+  SecGroupProjetSsh:
+    type: OS::Neutron::SecurityGroup
+    properties:
+      description: SecGroup for WEB-hosting VM
+      name: sg-projet-cloud-usage-ssh
+      rules:
+        - remote_ip_prefix: 0.0.0.0/0
+          protocol: tcp
+          port_range_min: 22
+          port_range_max: 22
+
+
+
+  VM_WEBSERVER:
+    type: OS::Nova::Server
+    properties:
+      key_name: {get_param: key_name}
+      #key_name: {get_resource: KeyPairVM1}
+      name: VM-WEBSERVER
+      image: {get_param: image}
+      flavor: {get_param: flavor}
+      networks:
+        #- network: { get_resource: Network1 } 
+        - port: { get_resource: VM_port_webserver }
+      #user_data_format: RAW
+      user_data_format: RAW
+      user_data: |
+        #cloud-config
+        runcmd:
+            - mkdir /home/debian/dockercompose/
+            - curl -o /home/debian/dockercompose/docker-compose.yml https://raw.githubusercontent.com/Thibaut17/ProjetCloudUsage/main/docker-compose-phpmyadmin.yml
+            - sudo docker-compose -f /home/debian/dockercompose/docker-compose.yml up -d
+
+
+
+  VM_DATABASE:
+    type: OS::Nova::Server
+    properties:
+      key_name: {get_param: key_name}
+      #key_name: {get_resource: KeyPairVM1}
+      name: VM-DATABASE
+      image: {get_param: image}
+      flavor: {get_param: flavor}
+      networks:
+        #- network: { get_resource: Network1 } 
+        - port: { get_resource: VM_port_database }
+      user_data_format: RAW
+      user_data: |
+        #cloud-config
+        runcmd:
+            - PATH="/sbin:$PATH"
+            - sudo mkfs.ext4 /dev/vdb
+            - sudo mkdir -p /mnt/mariadb
+            - sudo mount /dev/vdb /mnt/mariadb
+            - sudo docker volume create --name mariadb_volume --opt type=none --opt device=/mnt/mariadb --opt o=bind
+            - mkdir /home/debian/dockercompose/
+            - curl -o /home/debian/dockercompose/docker-compose.yml https://raw.githubusercontent.com/Thibaut17/ProjetCloudUsage/main/docker-compose-mariadb.yml
+            - sudo docker-compose -f /home/debian/dockercompose/docker-compose.yml up -d
+
+
+  VOLUME_DATABASE:
+    type: OS::Cinder::Volume
+    properties:
+      size: 2
+  VOLUME_ATTACHMENT:
+    type: OS::Cinder::VolumeAttachment
+    properties:
+      instance_uuid: { get_resource: VM_DATABASE }
+      volume_id: { get_resource: VOLUME_DATABASE}
+
+
+outputs:
+  floatingip:
+    description: floating ip validation
+    value: {get_attr: [VM_FLOAT_IP_WEBSERVER, floating_ip_address]}
+
